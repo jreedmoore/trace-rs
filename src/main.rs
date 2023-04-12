@@ -193,7 +193,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 if let Some((t, sphere)) = best_hit {
-                    *pixel = scene.global_light * sphere.color;
+                    *pixel += scene.global_light * sphere.color;
                     let p = ray.origin + t * ray.direction;
                     let n = (p - sphere.origin).normalize();
                     for light in &scene.lights {
@@ -210,6 +210,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
+            *pixel /= samples as f32;
             rayon_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         });
     println!("Finished render in: {} ms", render.elapsed().as_millis());
