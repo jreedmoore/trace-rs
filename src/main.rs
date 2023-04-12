@@ -84,6 +84,32 @@ struct Scene {
     lights: Vec<Light>,
     global_light: Vec3A,
 }
+impl Scene {
+    pub fn hits_any(&self, ray: &Ray) -> bool {
+        for sphere in &self.spheres {
+            if let Some(_) = sphere.ray_intersect(&ray) {
+                return true
+            }
+        }
+        false
+    }
+
+    pub fn best_hit(&self, ray: &Ray) -> Option<(f32, &Sphere)> {
+        let mut best_hit: Option<(f32, &Sphere)> = None;
+        for sphere in &self.spheres {
+            if let Some(t) = sphere.ray_intersect(&ray) {
+                if let Some((prior_t, _)) = best_hit {
+                    if t < prior_t {
+                        best_hit = Some((t, sphere));
+                    }
+                } else {
+                    best_hit = Some((t, sphere));
+                }
+            }
+        }
+        best_hit
+    }
+}
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut image = Image::new(960, 540);
 
@@ -121,6 +147,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Sphere {
                 origin: Vec3A::new(3.5, 0.5, 8.0),
                 radius: 1.0,
+                k_ambient: Vec3A::new(0.0, 0.0, 1.0),
+                k_diffuse: Vec3A::new(0.5, 0.5, 0.7),
+                k_specular: Vec3A::splat(0.1),
+                shininess: 20.0,
+            },
+            Sphere {
+                origin: Vec3A::new(0.0, -102.0, 12.0),
+                radius: 100.0,
                 k_ambient: Vec3A::new(0.0, 0.0, 1.0),
                 k_diffuse: Vec3A::new(0.5, 0.5, 0.7),
                 k_specular: Vec3A::splat(0.1),
@@ -179,18 +213,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     direction: p - camera,
                 };
 
-                let mut best_hit: Option<(f32, &Sphere)> = None;
-                for sphere in &scene.spheres {
-                    if let Some(t) = sphere.ray_intersect(&ray) {
-                        if let Some((prior_t, _)) = best_hit {
-                            if t < prior_t {
-                                best_hit = Some((t, sphere));
-                            }
-                        } else {
-                            best_hit = Some((t, sphere));
-                        }
-                    }
-                }
+                let best_hit = scene.best_hit(&ray);
 
                 if let Some((t, sphere)) = best_hit {
                     *pixel += scene.global_light * sphere.k_ambient;
@@ -201,7 +224,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                         let d = l_v.dot(n);
 
-                        if d > 0.0 {
+                        if d > 0.0 && !scene.hits_any(&Ray { origin: p, direction: l_v }) {
                             let r = (2.0*(n.dot(l_v))*n) - l_v;
                             let v = (camera - p).normalize();
                             *pixel += sphere.k_diffuse * d * light.diffuse_color;
