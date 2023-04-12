@@ -166,14 +166,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }),
             Box::new(Triangle::new(
-                Vec3A::new(6.0, -2.0, 16.0),
-                Vec3A::new(-6.0, -2.0, 16.0),
-                Vec3A::new(0.0, 5.0, 16.0),
-                /*
-                Vec3A::new(5.0, -1.5, 6.0),
-                Vec3A::new(-4.0, -1.5, 6.0),
+                Vec3A::new(10.0, -1.5, 3.0),
+                Vec3A::new(-10.0, -1.5, 3.0),
                 Vec3A::new(0.0, -1.0, 14.0),
-                */
                 Material {
                     k_ambient: Vec3A::new(0.0, 0.0, 1.0),
                     k_diffuse: Vec3A::new(0.5, 0.5, 0.7),

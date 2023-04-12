@@ -74,15 +74,14 @@ impl Triangle {
     }
 }
 
-pub const EPSILON: f32 = 1e-8;
+pub const EPSILON: f32 = 1e-6;
 impl Surface for Triangle {
     fn ray_intersect(&self, ray: &Ray) -> Option<f32> {
         // if ray and plane of triangle are parallel, no intersection
-        // Moller-Tromboe
+        // Moller-Trumbore
         let v0v1 = self.v1 - self.v0;
         let v0v2 = self.v2 - self.v0;
         let det = -ray.direction.dot(v0v1.cross(v0v2));
-        //println!("det: {}", det);
 
         if det < EPSILON {
             return None
@@ -93,22 +92,18 @@ impl Surface for Triangle {
         let b = ray.origin - self.v0;
         let det_u = -ray.direction.dot(b.cross(v0v2));
         let u = inv_det * det_u;
-        //println!("u: {}", u);
         if u < 0.0 || u > 1.0 {
             return None
         }
 
         let det_v = -ray.direction.dot(v0v1.cross(b));
         let v = inv_det * det_v;
-        //println!("v: {}", v);
-        if v < 0.0 || v > 1.0 {
+        if v < 0.0 || u + v > 1.0 {
             return None
         }
 
         let det_t = b.dot(v0v1.cross(v0v2));
-        //println!("det_t = {} dot ({} cross {})", b, v0v1, v0v2);
         let t = inv_det * det_t;
-        //println!("t: {}, det_t: {}", t, det_t);
         if t < EPSILON {
             None
         } else {
@@ -169,16 +164,15 @@ mod tests {
     #[test]
     fn test_triangle_intersection() {
         let triangle = Triangle::new(
-            Vec3A::new(1.0, -1.0, 1.0),
-            Vec3A::new(-1.0, -1.0, 1.0),
-            Vec3A::new(0.0, 1.0, 1.0),
+            Vec3A::new(6.0, -2.0, 16.0),
+            Vec3A::new(-6.0, -2.0, 16.0),
+            Vec3A::new(0.0, 5.0, 16.0),
             Material::default()
         );
 
-        let ray = Ray { origin: Vec3A::ZERO, direction: Vec3A::new(0.0, 1.0, 1.0) };
+        let ray = Ray { origin: Vec3A::ZERO, direction: Vec3A::new(-1.0, 5.0, 16.0).normalize() };
 
-        let t = triangle.ray_intersect(&ray).unwrap();
-
-        assert_approx_ex(t, 1.0, "t");
+        assert!(triangle.ray_intersect(&Ray { origin: Vec3A::ZERO, direction: Vec3A::new(-1.0, 5.0, 16.0).normalize() }).is_none());
+        assert!(triangle.ray_intersect(&Ray { origin: Vec3A::ZERO, direction: Vec3A::new(0.0, 5.0, 16.0).normalize() }).is_some());
     }
 }
