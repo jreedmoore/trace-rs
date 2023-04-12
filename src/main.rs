@@ -47,6 +47,7 @@ struct Sphere {
     k_ambient: Vec3A,
     k_diffuse: Vec3A,
     k_specular: Vec3A,
+    k_reflective: Vec3A,
     shininess: f32,
 }
 impl Sphere {
@@ -83,6 +84,7 @@ struct Scene {
     spheres: Vec<Sphere>,
     lights: Vec<Light>,
     global_light: Vec3A,
+    camera: Vec3A,
 }
 impl Scene {
     pub fn hits_any(&self, ray: &Ray) -> bool {
@@ -109,7 +111,30 @@ impl Scene {
         }
         best_hit
     }
+    
+    pub fn ray_color(&self, ray: &Ray) -> Vec3A {
+        let mut color = Vec3A::ZERO;
+        if let Some((t, sphere)) = self.best_hit(ray) {
+            color += self.global_light * sphere.k_ambient;
+            let p = ray.origin + t * ray.direction;
+            let n = (p - sphere.origin).normalize();
+            for light in &self.lights {
+                let l_v = (light.origin - p).normalize();
+
+                let d = l_v.dot(n);
+
+                if d > 0.0 && !self.hits_any(&Ray { origin: p, direction: l_v }) {
+                    let r = (2.0*(n.dot(l_v))*n) - l_v;
+                    let v = (self.camera - p).normalize();
+                    color += sphere.k_diffuse * d * light.diffuse_color;
+                    color += sphere.k_specular * v.dot(r).powf(sphere.shininess) * light.specular_color;
+                }
+            }
+        }
+        color
+    }
 }
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut image = Image::new(960, 540);
 
@@ -133,6 +158,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 radius: 1.0,
                 k_ambient: Vec3A::new(1.0, 0.0, 0.0),
                 k_diffuse: Vec3A::new(0.7, 0.5, 0.5),
+                k_reflective: Vec3A::splat(0.2),
                 k_specular: Vec3A::splat(0.1),
                 shininess: 20.0,
             },
@@ -141,6 +167,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 radius: 1.0,
                 k_ambient: Vec3A::new(0.0, 1.0, 0.0),
                 k_diffuse: Vec3A::new(0.5, 0.7, 0.5),
+                k_reflective: Vec3A::splat(0.2),
                 k_specular: Vec3A::splat(0.1),
                 shininess: 20.0,
             },
@@ -149,6 +176,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 radius: 1.0,
                 k_ambient: Vec3A::new(0.0, 0.0, 1.0),
                 k_diffuse: Vec3A::new(0.5, 0.5, 0.7),
+                k_reflective: Vec3A::splat(0.2),
                 k_specular: Vec3A::splat(0.1),
                 shininess: 20.0,
             },
@@ -157,6 +185,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 radius: 100.0,
                 k_ambient: Vec3A::new(0.0, 0.0, 1.0),
                 k_diffuse: Vec3A::new(0.5, 0.5, 0.7),
+                k_reflective: Vec3A::splat(0.2),
                 k_specular: Vec3A::splat(0.1),
                 shininess: 20.0,
             },
@@ -174,6 +203,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         ],
         global_light: Vec3A::new(0.5, 0.5, 0.5),
+        camera
     };
 
     let pixels_rendered = Arc::new(AtomicUsize::new(0));
@@ -213,25 +243,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     direction: p - camera,
                 };
 
-                let best_hit = scene.best_hit(&ray);
+                *pixel += scene.ray_color(&ray);
 
-                if let Some((t, sphere)) = best_hit {
-                    *pixel += scene.global_light * sphere.k_ambient;
-                    let p = ray.origin + t * ray.direction;
-                    let n = (p - sphere.origin).normalize();
-                    for light in &scene.lights {
-                        let l_v = (light.origin - p).normalize();
-
-                        let d = l_v.dot(n);
-
-                        if d > 0.0 && !scene.hits_any(&Ray { origin: p, direction: l_v }) {
-                            let r = (2.0*(n.dot(l_v))*n) - l_v;
-                            let v = (camera - p).normalize();
-                            *pixel += sphere.k_diffuse * d * light.diffuse_color;
-                            *pixel += sphere.k_specular * v.dot(r).powf(sphere.shininess) * light.specular_color;
-                        }
-                    }
-                }
+                
             }
             *pixel /= samples as f32;
             rayon_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
