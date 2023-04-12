@@ -44,9 +44,9 @@ struct Ray {
 struct Sphere {
     origin: Vec3A,
     radius: f32,
-    color: Vec3A,
-    k_diffuse: f32,
-    k_specular: f32,
+    k_ambient: Vec3A,
+    k_diffuse: Vec3A,
+    k_specular: Vec3A,
     shininess: f32,
 }
 impl Sphere {
@@ -105,37 +105,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Sphere {
                 origin: Vec3A::new(-4.0, -0.5, 14.0),
                 radius: 1.0,
-                color: Vec3A::new(1.0, 0.0, 0.0),
-                k_diffuse: 0.2,
-                k_specular: 0.1,
+                k_ambient: Vec3A::new(1.0, 0.0, 0.0),
+                k_diffuse: Vec3A::new(0.7, 0.5, 0.5),
+                k_specular: Vec3A::splat(0.1),
                 shininess: 20.0,
             },
             Sphere {
                 origin: Vec3A::new(3.0, 0.0, 10.0),
                 radius: 1.0,
-                color: Vec3A::new(0.0, 1.0, 0.0),
-                k_diffuse: 0.2,
-                k_specular: 0.7,
+                k_ambient: Vec3A::new(0.0, 1.0, 0.0),
+                k_diffuse: Vec3A::new(0.5, 0.7, 0.5),
+                k_specular: Vec3A::splat(0.1),
                 shininess: 20.0,
             },
             Sphere {
                 origin: Vec3A::new(3.5, 0.5, 8.0),
                 radius: 1.0,
-                color: Vec3A::new(0.0, 0.0, 1.0),
-                k_diffuse: 0.2,
-                k_specular: 0.1,
+                k_ambient: Vec3A::new(0.0, 0.0, 1.0),
+                k_diffuse: Vec3A::new(0.5, 0.5, 0.7),
+                k_specular: Vec3A::splat(0.1),
                 shininess: 20.0,
             },
         ],
         lights: vec![
             Light {
                 origin: Vec3A::new(-1.0, 8.0, 11.0),
-                diffuse_color: 0.2*Vec3A::new(1.0, 0.2, 1.0),
+                diffuse_color: 0.5*Vec3A::new(1.0, 0.2, 1.0),
                 specular_color: Vec3A::splat(0.8),
             },
             Light {
                 origin: Vec3A::new(9.0, 8.0, 5.0),
-                diffuse_color: 0.2*Vec3A::new(0.0, 1.0, 0.0),
+                diffuse_color: 0.5*Vec3A::new(0.0, 1.0, 0.0),
                 specular_color: Vec3A::splat(0.8),
             }
         ],
@@ -193,7 +193,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 if let Some((t, sphere)) = best_hit {
-                    *pixel += scene.global_light * sphere.color;
+                    *pixel += scene.global_light * sphere.k_ambient;
                     let p = ray.origin + t * ray.direction;
                     let n = (p - sphere.origin).normalize();
                     for light in &scene.lights {
