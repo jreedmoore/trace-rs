@@ -112,6 +112,11 @@ impl Scene {
         }
         color
     }
+
+    pub fn add_quad(&mut self, v0: Vec3A, v1: Vec3A, v2: Vec3A, v3: Vec3A, material: Material) {
+        self.surfaces.push(Box::new(Triangle::new(v0, v1, v2, material.clone())));
+        self.surfaces.push(Box::new(Triangle::new(v0, v2, v3, material)));
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -130,7 +135,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let camera = Vec3A::new(0.0, 0.0, -1.0);
 
-    let scene = Scene {
+    let mut scene = Scene {
         surfaces: vec![
             Box::new(Sphere {
                 origin: Vec3A::new(-4.0, -0.5, 14.0),
@@ -165,18 +170,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     shininess: 20.0,
                 }
             }),
-            Box::new(Triangle::new(
-                Vec3A::new(10.0, -1.5, 3.0),
-                Vec3A::new(-10.0, -1.5, 3.0),
-                Vec3A::new(0.0, -1.0, 14.0),
-                Material {
-                    k_ambient: Vec3A::new(0.0, 0.0, 1.0),
-                    k_diffuse: Vec3A::new(0.5, 0.5, 0.7),
-                    k_reflective: Vec3A::splat(0.01),
-                    k_specular: Vec3A::splat(0.2),
-                    shininess: 20.0,
-                }
-            )),
         ],
         lights: vec![
             Light {
@@ -193,6 +186,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         global_light: Vec3A::new(0.5, 0.5, 0.5),
         camera
     };
+
+    scene.add_quad(
+        Vec3A::new(10.0, -1.5, 3.0),
+        Vec3A::new(-10.0, -1.5, 3.0),
+        Vec3A::new(-10.0, -1.5, 20.0),
+        Vec3A::new(10.0, -1.5, 20.0),
+        Material {
+            k_ambient: Vec3A::new(0.7, 0.0, 0.7),
+            k_diffuse: Vec3A::new(0.5, 0.5, 0.7),
+            k_reflective: Vec3A::splat(0.1),
+            k_specular: Vec3A::splat(0.1),
+            shininess: 20.0,
+        }
+    );
 
     let pixels_rendered = Arc::new(AtomicUsize::new(0));
     let rayon_counter = Arc::clone(&pixels_rendered);

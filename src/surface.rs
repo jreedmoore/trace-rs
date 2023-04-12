@@ -129,6 +129,7 @@ pub struct Hit {
     pub surface_normal: Vec3A
 }
 
+#[derive(Debug,Clone)]
 pub struct Material {
     pub k_ambient: Vec3A,
     pub k_diffuse: Vec3A,
