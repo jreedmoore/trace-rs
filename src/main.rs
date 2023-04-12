@@ -1,4 +1,5 @@
-use std::cmp::min;
+mod surface;
+
 use std::fs::File;
 use std::sync::{atomic::AtomicUsize, Arc};
 use std::thread;
@@ -9,6 +10,9 @@ use std::io::Write;
 use glam::Vec3A;
 use rand::Rng;
 use rayon::prelude::*;
+use surface::Surface;
+
+use crate::surface::Sphere;
 
 struct Image {
     width: usize,
@@ -36,43 +40,11 @@ impl Image {
     }
 }
 
-struct Ray {
+pub struct Ray {
     origin: Vec3A,
     direction: Vec3A,
 }
 
-struct Sphere {
-    origin: Vec3A,
-    radius: f32,
-    k_ambient: Vec3A,
-    k_diffuse: Vec3A,
-    k_specular: Vec3A,
-    k_reflective: Vec3A,
-    shininess: f32,
-}
-impl Sphere {
-    fn ray_intersect(&self, ray: &Ray) -> Option<f32> {
-        let a = ray.direction.length_squared();
-        let oc = ray.origin - self.origin;
-        let half_b = oc.dot(ray.direction);
-        let c = oc.length_squared() - self.radius * self.radius;
-
-        let discriminant = half_b * half_b - a * c;
-        if discriminant < 0.0 {
-            None
-        } else {
-            let root_one = (-half_b - discriminant.sqrt()) / a;
-            let root_two = (-half_b + discriminant.sqrt()) / a;
-            if root_one > 1.0 {
-                Some(root_one)
-            } else if root_two > 1.0 {
-                Some(root_two)
-            } else {
-                None
-            }
-        }
-    }
-}
 
 struct Light {
     origin: Vec3A,
@@ -81,14 +53,14 @@ struct Light {
 }
 
 struct Scene {
-    spheres: Vec<Sphere>,
+    surfaces: Vec<Box<dyn Surface + Sync>>,
     lights: Vec<Light>,
     global_light: Vec3A,
     camera: Vec3A,
 }
 impl Scene {
     pub fn hits_any(&self, ray: &Ray) -> bool {
-        for sphere in &self.spheres {
+        for sphere in &self.surfaces {
             if let Some(_) = sphere.ray_intersect(&ray) {
                 return true
             }
@@ -96,9 +68,9 @@ impl Scene {
         false
     }
 
-    pub fn best_hit(&self, ray: &Ray) -> Option<(f32, &Sphere)> {
-        let mut best_hit: Option<(f32, &Sphere)> = None;
-        for sphere in &self.spheres {
+    pub fn best_hit(&self, ray: &Ray) -> Option<(f32, &Box<dyn Surface + Sync>)> {
+        let mut best_hit: Option<(f32, &Box<dyn Surface + Sync>)> = None;
+        for sphere in &self.surfaces {
             if let Some(t) = sphere.ray_intersect(&ray) {
                 if let Some((prior_t, _)) = best_hit {
                     if t < prior_t {
@@ -112,22 +84,29 @@ impl Scene {
         best_hit
     }
     
-    pub fn ray_color(&self, ray: &Ray) -> Vec3A {
+    pub fn ray_color(&self, ray: &Ray, depth: usize) -> Vec3A {
         let mut color = Vec3A::ZERO;
-        if let Some((t, sphere)) = self.best_hit(ray) {
-            color += self.global_light * sphere.k_ambient;
-            let p = ray.origin + t * ray.direction;
-            let n = (p - sphere.origin).normalize();
+        if depth <= 0 {
+            return color;
+        }
+        if let Some((t, surface)) = self.best_hit(ray) {
+            color += self.global_light * surface.k_ambient();
+            let hit = surface.hit(ray, t);
+            let p = hit.at;
+            let n = hit.surface_normal;
             for light in &self.lights {
                 let l_v = (light.origin - p).normalize();
+                let v = (self.camera - p).normalize();
+                let view_reflection = (2.0*(n.dot(v)*n)) - v;
+
+                color += surface.k_reflective() * self.ray_color(&Ray { origin: p, direction: view_reflection}, depth - 1);
 
                 let d = l_v.dot(n);
 
                 if d > 0.0 && !self.hits_any(&Ray { origin: p, direction: l_v }) {
-                    let r = (2.0*(n.dot(l_v))*n) - l_v;
-                    let v = (self.camera - p).normalize();
-                    color += sphere.k_diffuse * d * light.diffuse_color;
-                    color += sphere.k_specular * v.dot(r).powf(sphere.shininess) * light.specular_color;
+                    let lr = (2.0*(n.dot(l_v))*n) - l_v;
+                    color += surface.k_diffuse() * d * light.diffuse_color;
+                    color += surface.k_specular() * v.dot(lr).powf(surface.shininess()) * light.specular_color;
                 }
             }
         }
@@ -152,8 +131,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let camera = Vec3A::new(0.0, 0.0, -1.0);
 
     let scene = Scene {
-        spheres: vec![
-            Sphere {
+        surfaces: vec![
+            Box::new(Sphere {
                 origin: Vec3A::new(-4.0, -0.5, 14.0),
                 radius: 1.0,
                 k_ambient: Vec3A::new(1.0, 0.0, 0.0),
@@ -161,8 +140,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 k_reflective: Vec3A::splat(0.2),
                 k_specular: Vec3A::splat(0.1),
                 shininess: 20.0,
-            },
-            Sphere {
+            }),
+            Box::new(Sphere {
                 origin: Vec3A::new(3.0, 0.0, 10.0),
                 radius: 1.0,
                 k_ambient: Vec3A::new(0.0, 1.0, 0.0),
@@ -170,8 +149,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 k_reflective: Vec3A::splat(0.2),
                 k_specular: Vec3A::splat(0.1),
                 shininess: 20.0,
-            },
-            Sphere {
+            }),
+            Box::new(Sphere {
                 origin: Vec3A::new(3.5, 0.5, 8.0),
                 radius: 1.0,
                 k_ambient: Vec3A::new(0.0, 0.0, 1.0),
@@ -179,16 +158,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 k_reflective: Vec3A::splat(0.2),
                 k_specular: Vec3A::splat(0.1),
                 shininess: 20.0,
-            },
-            Sphere {
+            }),
+            Box::new(Sphere {
                 origin: Vec3A::new(0.0, -102.0, 12.0),
                 radius: 100.0,
                 k_ambient: Vec3A::new(0.0, 0.0, 1.0),
                 k_diffuse: Vec3A::new(0.5, 0.5, 0.7),
-                k_reflective: Vec3A::splat(0.2),
-                k_specular: Vec3A::splat(0.1),
+                k_reflective: Vec3A::splat(0.01),
+                k_specular: Vec3A::splat(0.2),
                 shininess: 20.0,
-            },
+            }),
         ],
         lights: vec![
             Light {
@@ -221,6 +200,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         thread::sleep(Duration::from_millis(500));
     });
+
+    let ray_depth = 10;
     image
         .pixels
         .par_iter_mut()
@@ -243,7 +224,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     direction: p - camera,
                 };
 
-                *pixel += scene.ray_color(&ray);
+                *pixel += scene.ray_color(&ray, ray_depth);
 
                 
             }
