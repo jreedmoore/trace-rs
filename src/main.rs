@@ -12,7 +12,7 @@ use rand::Rng;
 use rayon::prelude::*;
 use surface::Surface;
 
-use crate::surface::{Sphere, Material};
+use crate::surface::{Sphere, Material, Triangle};
 
 struct Image {
     width: usize,
@@ -165,17 +165,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     shininess: 20.0,
                 }
             }),
-            Box::new(Sphere {
-                origin: Vec3A::new(0.0, -102.0, 12.0),
-                radius: 100.0,
-                material: Material {
+            Box::new(Triangle::new(
+                Vec3A::new(6.0, -2.0, 16.0),
+                Vec3A::new(-6.0, -2.0, 16.0),
+                Vec3A::new(0.0, 5.0, 16.0),
+                /*
+                Vec3A::new(5.0, -1.5, 6.0),
+                Vec3A::new(-4.0, -1.5, 6.0),
+                Vec3A::new(0.0, -1.0, 14.0),
+                */
+                Material {
                     k_ambient: Vec3A::new(0.0, 0.0, 1.0),
                     k_diffuse: Vec3A::new(0.5, 0.5, 0.7),
                     k_reflective: Vec3A::splat(0.01),
                     k_specular: Vec3A::splat(0.2),
                     shininess: 20.0,
                 }
-            }),
+            )),
         ],
         lights: vec![
             Light {
