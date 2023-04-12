@@ -12,7 +12,7 @@ use rand::Rng;
 use rayon::prelude::*;
 use surface::Surface;
 
-use crate::surface::Sphere;
+use crate::surface::{Sphere, Material};
 
 struct Image {
     width: usize,
@@ -90,7 +90,7 @@ impl Scene {
             return color;
         }
         if let Some((t, surface)) = self.best_hit(ray) {
-            color += self.global_light * surface.k_ambient();
+            color += self.global_light * surface.material().k_ambient;
             let hit = surface.hit(ray, t);
             let p = hit.at;
             let n = hit.surface_normal;
@@ -99,14 +99,14 @@ impl Scene {
                 let v = (self.camera - p).normalize();
                 let view_reflection = (2.0*(n.dot(v)*n)) - v;
 
-                color += surface.k_reflective() * self.ray_color(&Ray { origin: p, direction: view_reflection}, depth - 1);
+                color += surface.material().k_reflective * self.ray_color(&Ray { origin: p, direction: view_reflection}, depth - 1);
 
                 let d = l_v.dot(n);
 
                 if d > 0.0 && !self.hits_any(&Ray { origin: p, direction: l_v }) {
                     let lr = (2.0*(n.dot(l_v))*n) - l_v;
-                    color += surface.k_diffuse() * d * light.diffuse_color;
-                    color += surface.k_specular() * v.dot(lr).powf(surface.shininess()) * light.specular_color;
+                    color += surface.material().k_diffuse * d * light.diffuse_color;
+                    color += surface.material().k_specular * v.dot(lr).powf(surface.material().shininess) * light.specular_color;
                 }
             }
         }
@@ -135,38 +135,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Box::new(Sphere {
                 origin: Vec3A::new(-4.0, -0.5, 14.0),
                 radius: 1.0,
-                k_ambient: Vec3A::new(1.0, 0.0, 0.0),
-                k_diffuse: Vec3A::new(0.7, 0.5, 0.5),
-                k_reflective: Vec3A::splat(0.2),
-                k_specular: Vec3A::splat(0.1),
-                shininess: 20.0,
+                material: Material {
+                    k_ambient: Vec3A::new(1.0, 0.0, 0.0),
+                    k_diffuse: Vec3A::new(0.7, 0.5, 0.5),
+                    k_reflective: Vec3A::splat(0.2),
+                    k_specular: Vec3A::splat(0.1),
+                    shininess: 20.0,
+                }
             }),
             Box::new(Sphere {
                 origin: Vec3A::new(3.0, 0.0, 10.0),
                 radius: 1.0,
-                k_ambient: Vec3A::new(0.0, 1.0, 0.0),
-                k_diffuse: Vec3A::new(0.5, 0.7, 0.5),
-                k_reflective: Vec3A::splat(0.2),
-                k_specular: Vec3A::splat(0.1),
-                shininess: 20.0,
+                material: Material {
+                    k_ambient: Vec3A::new(0.0, 1.0, 0.0),
+                    k_diffuse: Vec3A::new(0.5, 0.7, 0.5),
+                    k_reflective: Vec3A::splat(0.2),
+                    k_specular: Vec3A::splat(0.1),
+                    shininess: 20.0,
+                }
             }),
             Box::new(Sphere {
                 origin: Vec3A::new(3.5, 0.5, 8.0),
                 radius: 1.0,
-                k_ambient: Vec3A::new(0.0, 0.0, 1.0),
-                k_diffuse: Vec3A::new(0.5, 0.5, 0.7),
-                k_reflective: Vec3A::splat(0.2),
-                k_specular: Vec3A::splat(0.1),
-                shininess: 20.0,
+                material: Material {
+                    k_ambient: Vec3A::new(0.0, 0.0, 1.0),
+                    k_diffuse: Vec3A::new(0.5, 0.5, 0.7),
+                    k_reflective: Vec3A::splat(0.2),
+                    k_specular: Vec3A::splat(0.1),
+                    shininess: 20.0,
+                }
             }),
             Box::new(Sphere {
                 origin: Vec3A::new(0.0, -102.0, 12.0),
                 radius: 100.0,
-                k_ambient: Vec3A::new(0.0, 0.0, 1.0),
-                k_diffuse: Vec3A::new(0.5, 0.5, 0.7),
-                k_reflective: Vec3A::splat(0.01),
-                k_specular: Vec3A::splat(0.2),
-                shininess: 20.0,
+                material: Material {
+                    k_ambient: Vec3A::new(0.0, 0.0, 1.0),
+                    k_diffuse: Vec3A::new(0.5, 0.5, 0.7),
+                    k_reflective: Vec3A::splat(0.01),
+                    k_specular: Vec3A::splat(0.2),
+                    shininess: 20.0,
+                }
             }),
         ],
         lights: vec![
