@@ -1,0 +1,3 @@
+- [ ] Get teapot with vertex normals, apply Phong interpolation
+- [ ] Improve BVH construction heuristic, minimize SAH on a small set of bins sorted on largest axis
+- [ ] Set up some kind of scene description library, and generally clean up main function

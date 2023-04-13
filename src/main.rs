@@ -133,7 +133,7 @@ where
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let width = 960;
+    let width = 480;
     let height = width * 9 / 16;
     let mut image = Image::new(width, height);
 
@@ -253,13 +253,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .map(|s| s.parse::<usize>())
                     .flatten()
                     .collect::<Vec<usize>>();
-                /*
                 builder.surfaces.push(CanHit::Triangle(Triangle::new(
                     vertices[nums[0] - 1],
                     vertices[nums[1] - 1],
                     vertices[nums[2] - 1],
                     &material,
-                )));*/
+                )));
             }
             _ => (),
         }
@@ -298,7 +297,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    let samples = 10;
+    let samples = 2;
     let ray_depth = 10;
     image
         .pixels
