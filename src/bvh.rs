@@ -1,5 +1,31 @@
-use crate::surface::{CanHit, Geometry, AABB};
+use crate::surface::{CanHit, AABB};
 
+pub fn new<'m>(surfaces: &mut [CanHit<'m>]) -> CanHit<'m> {
+    let mut bounding = AABB::zero();
+    for surface in surfaces.iter() {
+        bounding.union_mut(&surface.aabb());
+    }
+    if surfaces.len() >= 2 {
+        let axis = bounding.max_axis();
+
+        surfaces.sort_unstable_by(|a, b| {
+            a.aabb().midpoint()[axis]
+                .partial_cmp(&b.aabb().midpoint()[axis])
+                .unwrap()
+        });
+        let (mut a, mut b) = surfaces.split_at_mut(surfaces.len() / 2);
+        CanHit::BVH {
+            bounding,
+            children: vec![new(&mut a), new(&mut b)],
+        }
+    } else {
+        CanHit::BVH {
+            bounding,
+            children: surfaces.to_vec(),
+        }
+    }
+}
+/*
 pub enum BVH<'a> {
     Internal {
         surfaces: Vec<BVH<'a>>,
@@ -85,4 +111,4 @@ impl<'a> CanHit for BVH<'a> {
         self.bounding().clone()
     }
 }
-
+*/

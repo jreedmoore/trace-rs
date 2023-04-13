@@ -1,18 +1,57 @@
-use std::f32::NEG_INFINITY;
+use std::f32::{INFINITY, NEG_INFINITY};
 
 use glam::Vec3A;
 
 use crate::Ray;
 
-pub trait CanHit {
-    fn ray_intersect(&self, ray: &Ray) -> Option<(f32, &dyn Geometry)>;
-    fn hits_any(&self, ray: &Ray) -> bool {
+#[derive(Debug, Clone)]
+pub enum CanHit<'m> {
+    BVH {
+        bounding: AABB,
+        children: Vec<CanHit<'m>>,
+    },
+    Sphere(Sphere<'m>),
+    Triangle(Triangle<'m>),
+}
+impl<'m> CanHit<'m> {
+    pub fn ray_intersect(&self, ray: &Ray) -> Option<(f32, &dyn Geometry)> {
+        match self {
+            CanHit::BVH { bounding, children } => {
+                if !bounding.ray_hit(ray) {
+                    return None;
+                }
+
+                let mut best_hit = None;
+                for surf in children.iter() {
+                    if let Some((t, geom)) = surf.ray_intersect(&ray) {
+                        if let Some((prior_t, _)) = best_hit {
+                            if t < prior_t {
+                                best_hit = Some((t, geom));
+                            }
+                        } else {
+                            best_hit = Some((t, geom));
+                        }
+                    }
+                }
+                best_hit
+            }
+            CanHit::Sphere(s) => s.ray_intersect(ray),
+            CanHit::Triangle(t) => t.ray_intersect(ray),
+        }
+    }
+    pub fn hits_any(&self, ray: &Ray) -> bool {
         self.ray_intersect(ray).is_some()
     }
-    fn aabb(&self) -> AABB;
+    pub fn aabb(&self) -> AABB {
+        match self {
+            CanHit::BVH { bounding, .. } => bounding.clone(),
+            CanHit::Sphere(s) => s.aabb(),
+            CanHit::Triangle(t) => t.aabb(),
+        }
+    }
 }
-pub trait Geometry {
-    fn material(&self) -> &Material;
+pub trait Geometry<'m> {
+    fn material(&self) -> &'m Material;
     fn hit(&self, ray: &Ray, t: f32) -> Hit;
 }
 #[derive(Debug, Clone)]
@@ -60,13 +99,14 @@ impl AABB {
     }
 }
 
-pub struct Sphere {
+#[derive(Debug, Clone)]
+pub struct Sphere<'a> {
     pub origin: Vec3A,
     pub radius: f32,
 
-    pub material: Material,
+    pub material: &'a Material,
 }
-impl CanHit for Sphere {
+impl<'a> Sphere<'a> {
     fn ray_intersect(&self, ray: &Ray) -> Option<(f32, &dyn Geometry)> {
         let a = ray.direction.length_squared();
         let oc = ray.origin - self.origin;
@@ -96,7 +136,7 @@ impl CanHit for Sphere {
         }
     }
 }
-impl Geometry for Sphere {
+impl<'m> Geometry<'m> for Sphere<'m> {
     fn hit(&self, ray: &Ray, t: f32) -> Hit {
         let p = ray.origin + t * ray.direction;
         Hit {
@@ -105,22 +145,23 @@ impl Geometry for Sphere {
         }
     }
 
-    fn material(&self) -> &Material {
+    fn material(&self) -> &'m Material {
         &self.material
     }
 }
 
-pub struct Triangle {
+#[derive(Debug, Clone)]
+pub struct Triangle<'m> {
     v0: Vec3A,
     v1: Vec3A,
     v2: Vec3A,
 
     normal: Vec3A,
 
-    pub material: Material,
+    pub material: &'m Material,
 }
-impl Triangle {
-    pub fn new(v0: Vec3A, v1: Vec3A, v2: Vec3A, material: Material) -> Triangle {
+impl<'m> Triangle<'m> {
+    pub fn new(v0: Vec3A, v1: Vec3A, v2: Vec3A, material: &'m Material) -> Triangle<'m> {
         let a = v1 - v0;
         let b = v2 - v0;
         let normal = a.cross(b).normalize();
@@ -136,13 +177,14 @@ impl Triangle {
 }
 
 pub const EPSILON: f32 = 1e-6;
-impl CanHit for Triangle {
-    fn ray_intersect(&self, ray: &Ray) -> Option<(f32, &dyn Geometry)> {
+impl<'m> Triangle<'m> {
+    fn ray_intersect(&self, ray: &Ray) -> Option<(f32, &dyn Geometry<'m>)> {
         // if ray and plane of triangle are parallel, no intersection
         // Moller-Trumbore
         let v0v1 = self.v1 - self.v0;
         let v0v2 = self.v2 - self.v0;
-        let det = -ray.direction.dot(v0v1.cross(v0v2));
+        let plane_vec = v0v1.cross(v0v2);
+        let det = -ray.direction.dot(plane_vec);
 
         if det < EPSILON {
             return None;
@@ -163,13 +205,14 @@ impl CanHit for Triangle {
             return None;
         }
 
-        let det_t = b.dot(v0v1.cross(v0v2));
+        let det_t = b.dot(plane_vec);
         let t = inv_det * det_t;
+
         if t < EPSILON {
             None
         } else {
             Some((t, self))
-        }
+        } 
     }
 
     fn aabb(&self) -> AABB {
@@ -179,7 +222,7 @@ impl CanHit for Triangle {
         }
     }
 }
-impl Geometry for Triangle {
+impl<'m> Geometry<'m> for Triangle<'m> {
     fn hit(&self, ray: &Ray, t: f32) -> Hit {
         Hit {
             at: ray.origin + t * ray.direction,
@@ -188,7 +231,7 @@ impl Geometry for Triangle {
     }
 
     // material props
-    fn material(&self) -> &Material {
+    fn material(&self) -> &'m Material {
         &self.material
     }
 }
@@ -220,6 +263,8 @@ impl Material {
 
 #[cfg(test)]
 mod tests {
+    use std::default;
+
     use glam::Vec3A;
 
     use crate::{surface::AABB, Ray};
@@ -233,18 +278,25 @@ mod tests {
 
     #[test]
     fn test_triangle_intersection() {
+        let mat = Material::default();
         let triangle = Triangle::new(
             Vec3A::new(6.0, -2.0, 16.0),
             Vec3A::new(-6.0, -2.0, 16.0),
             Vec3A::new(0.0, 5.0, 16.0),
-            Material::default(),
+            &mat,
         );
 
         assert!(triangle
-            .ray_intersect(&Ray::new( Vec3A::ZERO, Vec3A::new(-1.0, 5.0, 16.0).normalize()))
+            .ray_intersect(&Ray::new(
+                Vec3A::ZERO,
+                Vec3A::new(-1.0, 5.0, 16.0).normalize()
+            ))
             .is_none());
         assert!(triangle
-            .ray_intersect(&Ray::new(Vec3A::ZERO, Vec3A::new(0.0, 5.0, 16.0).normalize()))
+            .ray_intersect(&Ray::new(
+                Vec3A::ZERO,
+                Vec3A::new(0.0, 5.0, 16.0).normalize()
+            ))
             .is_some());
     }
 
@@ -255,7 +307,7 @@ mod tests {
             max: Vec3A::splat(1.0),
         };
 
-        assert!(aabb.ray_hit(&Ray::new(Vec3A::new(0.0, 0.0, -2.0),Vec3A::Z)));
-        assert!(!aabb.ray_hit(&Ray::new(Vec3A::new(2.0, 0.0, -2.0),Vec3A::Z)));
+        assert!(aabb.ray_hit(&Ray::new(Vec3A::new(0.0, 0.0, -2.0), Vec3A::Z)));
+        assert!(!aabb.ray_hit(&Ray::new(Vec3A::new(2.0, 0.0, -2.0), Vec3A::Z)));
     }
 }
