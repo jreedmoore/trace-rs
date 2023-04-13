@@ -1,6 +1,7 @@
 mod bvh;
 mod surface;
 
+use std::collections::VecDeque;
 use std::fs::File;
 use std::sync::{atomic::AtomicUsize, Arc};
 use std::time::{Duration, Instant};
@@ -132,7 +133,7 @@ where
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let width = 1920;
+    let width = 960;
     let height = width * 9 / 16;
     let mut image = Image::new(width, height);
 
@@ -252,12 +253,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .map(|s| s.parse::<usize>())
                     .flatten()
                     .collect::<Vec<usize>>();
+                /*
                 builder.surfaces.push(CanHit::Triangle(Triangle::new(
                     vertices[nums[0] - 1],
                     vertices[nums[1] - 1],
                     vertices[nums[2] - 1],
                     &material,
-                )));
+                )));*/
             }
             _ => (),
         }
@@ -270,17 +272,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let reporter_counter = Arc::clone(&pixels_rendered);
 
     let render = Instant::now();
-    let samples = 100;
-    let _handle = thread::spawn(move || loop {
-        let rendered = reporter_counter.load(std::sync::atomic::Ordering::SeqCst);
-        let percent = rendered as f32 * 100.0 / (fh * fw);
-        println!("{:.2}%", percent);
-        if rendered == h * w {
-            break;
+    let progress_report_interval = 500;
+    let _handle = thread::spawn(move || {
+        let mut estimator = VecDeque::new();
+        let mut prev_progress = 0.0;
+        loop {
+            let rendered = reporter_counter.load(std::sync::atomic::Ordering::SeqCst);
+            let progress = rendered as f32 / (fh * fw);
+            if estimator.len() >= 10 {
+                estimator.pop_front();
+            }
+            estimator.push_back(progress);
+            let mut progress_avg = 0.0;
+            for i in 1..estimator.len() {
+                progress_avg += estimator[i] - estimator[i - 1];
+            }
+            progress_avg /= estimator.len() as f32;
+            let estimated_remaining = (progress_report_interval as f32 / progress_avg) * (1.0 - progress);
+            prev_progress = progress;
+            println!("{:.2}% est remaining: {:.2} s", progress * 100.0, estimated_remaining / 1000.0);
+            if rendered == h * w {
+                break;
+            }
+            thread::sleep(Duration::from_millis(progress_report_interval));
         }
-        thread::sleep(Duration::from_millis(500));
     });
 
+    let samples = 10;
     let ray_depth = 10;
     image
         .pixels
@@ -292,8 +310,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let mut rng = rand::thread_rng();
             for _ in 0..samples {
-                let xt = (x as f32+ rng.gen::<f32>()) / (fw - 1.0);
-                let yt = (y as f32+ rng.gen::<f32>()) / (fh - 1.0);
+                let xt = (x as f32 + rng.gen::<f32>()) / (fw - 1.0);
+                let yt = (y as f32 + rng.gen::<f32>()) / (fh - 1.0);
 
                 let t = top_left.lerp(top_right, xt);
                 let b = bottom_left.lerp(bottom_right, xt);

@@ -41,7 +41,7 @@ impl<'a, 'm> BVH<'a, 'm> {
             let idx = leaf.len();
             leaf.push(Leaf {
                 begin: surface_index,
-                length: surfaces.len(),
+                end: surface_index + surfaces.len(),
                 bounding,
             });
             ChildPointer::Leaf(idx)
@@ -84,8 +84,11 @@ impl<'a, 'm> BVH<'a, 'm> {
                 if !node.bounding.ray_hit(ray) {
                     return None;
                 }
-                self.ray_intersect_walk(ray, &node.left)
-                    .or_else(|| self.ray_intersect_walk(ray, &node.right))
+
+                min_of_opt(
+                    &self.ray_intersect_walk(ray, &node.left),
+                    &self.ray_intersect_walk(ray, &node.right),
+                    |(a,_),(b,_)| a < b)
             }
             ChildPointer::Leaf(l) => {
                 let leaf = &self.leaf[*l];
@@ -93,16 +96,8 @@ impl<'a, 'm> BVH<'a, 'm> {
                     return None;
                 }
                 let mut best_hit = None;
-                for surf in self.surfaces[leaf.begin..(leaf.begin + leaf.length)].iter() {
-                    if let Some((t, geom)) = surf.ray_intersect(&ray) {
-                        if let Some((prior_t, _)) = best_hit {
-                            if t < prior_t {
-                                best_hit = Some((t, geom));
-                            }
-                        } else {
-                            best_hit = Some((t, geom));
-                        }
-                    }
+                for surf in self.surfaces[leaf.begin..leaf.end].iter() {
+                    best_hit = min_of_opt(&best_hit, &surf.ray_intersect(&ray), |(a,_),(b,_)| a < b);
                 }
                 best_hit
             }
@@ -127,7 +122,7 @@ impl<'a, 'm> BVH<'a, 'm> {
                 if !leaf.bounding.ray_hit(ray) {
                     return false;
                 }
-                for surf in self.surfaces[leaf.begin..(leaf.begin + leaf.length)].iter() {
+                for surf in self.surfaces[leaf.begin..leaf.end].iter() {
                     if surf.hits_any(ray) {
                         return true;
                     }
@@ -135,6 +130,16 @@ impl<'a, 'm> BVH<'a, 'm> {
                 false
             }
         }
+    }
+}
+fn min_of_opt<T: Copy, F>(a: &Option<T>, b: &Option<T>, f: F) -> Option<T>
+    where F: Fn(&T, &T) -> bool
+{
+    match (a,b) {
+        (None, None) => None,
+        (None, Some(b)) => Some(*b),
+        (Some(a), None) => Some(*a),
+        (Some(a), Some(b)) => Some(if f(a,b) { *a } else { *b })
     }
 }
 #[derive(Debug, Clone)]
@@ -146,7 +151,7 @@ pub struct Internal {
 #[derive(Debug, Clone)]
 pub struct Leaf {
     begin: usize,
-    length: usize,
+    end: usize,
     bounding: AABB,
 }
 
