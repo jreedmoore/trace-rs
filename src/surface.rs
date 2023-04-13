@@ -2,39 +2,16 @@ use std::f32::{INFINITY, NEG_INFINITY};
 
 use glam::Vec3A;
 
-use crate::Ray;
+use crate::{bvh::BVH, Ray};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum CanHit<'m> {
-    BVH {
-        bounding: AABB,
-        children: Vec<CanHit<'m>>,
-    },
     Sphere(Sphere<'m>),
     Triangle(Triangle<'m>),
 }
 impl<'m> CanHit<'m> {
     pub fn ray_intersect(&self, ray: &Ray) -> Option<(f32, &dyn Geometry)> {
         match self {
-            CanHit::BVH { bounding, children } => {
-                if !bounding.ray_hit(ray) {
-                    return None;
-                }
-
-                let mut best_hit = None;
-                for surf in children.iter() {
-                    if let Some((t, geom)) = surf.ray_intersect(&ray) {
-                        if let Some((prior_t, _)) = best_hit {
-                            if t < prior_t {
-                                best_hit = Some((t, geom));
-                            }
-                        } else {
-                            best_hit = Some((t, geom));
-                        }
-                    }
-                }
-                best_hit
-            }
             CanHit::Sphere(s) => s.ray_intersect(ray),
             CanHit::Triangle(t) => t.ray_intersect(ray),
         }
@@ -44,7 +21,6 @@ impl<'m> CanHit<'m> {
     }
     pub fn aabb(&self) -> AABB {
         match self {
-            CanHit::BVH { bounding, .. } => bounding.clone(),
             CanHit::Sphere(s) => s.aabb(),
             CanHit::Triangle(t) => t.aabb(),
         }
@@ -212,7 +188,7 @@ impl<'m> Triangle<'m> {
             None
         } else {
             Some((t, self))
-        } 
+        }
     }
 
     fn aabb(&self) -> AABB {

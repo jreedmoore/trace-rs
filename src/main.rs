@@ -8,6 +8,7 @@ use std::{io, thread};
 
 use std::io::{BufRead, Write};
 
+use bvh::BVH;
 use glam::Vec3A;
 use rand::Rng;
 use rayon::prelude::*;
@@ -64,9 +65,9 @@ struct SceneBuilder<'m> {
     camera: Vec3A,
 }
 impl<'m> SceneBuilder<'m> {
-    pub fn build(&mut self) -> Scene {
+    pub fn build<'a>(&'a mut self) -> Scene<'a, 'm> {
         Scene {
-            bvh: bvh::new(&mut self.surfaces),
+            bvh: bvh::BVH::new(&mut self.surfaces),
             lights: &self.lights,
             global_light: self.global_light,
             camera: self.camera,
@@ -80,21 +81,24 @@ impl<'m> SceneBuilder<'m> {
     }
 }
 struct Scene<'a, 'm> {
-    bvh: CanHit<'m>,
+    bvh: BVH<'a, 'm>,
     lights: &'a [Light],
     global_light: Vec3A,
     camera: Vec3A,
 }
-impl<'a, 'm> Scene<'a, 'm> {
-    pub fn hits_any(&self, ray: &Ray) -> bool {
+impl<'a, 'm> Scene<'a, 'm>
+where
+    'a: 'm,
+{
+    pub fn hits_any(&'a self, ray: &Ray) -> bool {
         self.bvh.hits_any(ray)
     }
 
-    pub fn best_hit(&self, ray: &Ray) -> Option<(f32, &dyn Geometry)> {
+    pub fn best_hit(&'a self, ray: &Ray) -> Option<(f32, &dyn Geometry)> {
         self.bvh.ray_intersect(ray)
     }
 
-    pub fn ray_color(&self, ray: &Ray, depth: usize) -> Vec3A {
+    pub fn ray_color(&'a self, ray: &Ray, depth: usize) -> Vec3A {
         let mut color = Vec3A::ZERO;
         if depth <= 0 {
             return color;
@@ -128,7 +132,7 @@ impl<'a, 'm> Scene<'a, 'm> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let width = 960;
+    let width = 1920;
     let height = width * 9 / 16;
     let mut image = Image::new(width, height);
 
@@ -266,7 +270,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let reporter_counter = Arc::clone(&pixels_rendered);
 
     let render = Instant::now();
-    let samples = 1;
+    let samples = 100;
     let _handle = thread::spawn(move || loop {
         let rendered = reporter_counter.load(std::sync::atomic::Ordering::SeqCst);
         let percent = rendered as f32 * 100.0 / (fh * fw);
@@ -288,8 +292,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let mut rng = rand::thread_rng();
             for _ in 0..samples {
-                let xt = (x as f32/*+ rng.gen::<f32>()*/) / (fw - 1.0);
-                let yt = (y as f32/*+ rng.gen::<f32>()*/) / (fh - 1.0);
+                let xt = (x as f32+ rng.gen::<f32>()) / (fw - 1.0);
+                let yt = (y as f32+ rng.gen::<f32>()) / (fh - 1.0);
 
                 let t = top_left.lerp(top_right, xt);
                 let b = bottom_left.lerp(bottom_right, xt);

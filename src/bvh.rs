@@ -1,84 +1,99 @@
-use crate::surface::{CanHit, AABB};
+use crate::{
+    surface::{CanHit, Geometry, AABB},
+    Ray,
+};
 
-pub fn new<'m>(surfaces: &mut [CanHit<'m>]) -> CanHit<'m> {
-    let mut bounding = AABB::zero();
-    for surface in surfaces.iter() {
-        bounding.union_mut(&surface.aabb());
+#[derive(Debug)]
+pub struct BVH<'a, 'm> {
+    internal: Vec<Internal>,
+    leaf: Vec<Leaf>,
+    surfaces: &'a mut [CanHit<'m>],
+    root: usize,
+}
+impl<'a, 'm> BVH<'a, 'm> {
+    pub fn new(surfaces: &'a mut [CanHit<'m>]) -> BVH<'a, 'm> {
+        let mut internal = vec![];
+        let mut leaf = vec![];
+        let p = BVH::new_recur(surfaces, 0, &mut internal, &mut leaf);
+        if let ChildPointer::Internal(idx) = p {
+            BVH {
+                internal,
+                leaf,
+                surfaces,
+                root: idx,
+            }
+        } else {
+            panic!("bvh construction failed")
+        }
     }
-    if surfaces.len() >= 2 {
-        let axis = bounding.max_axis();
 
-        surfaces.sort_unstable_by(|a, b| {
-            a.aabb().midpoint()[axis]
-                .partial_cmp(&b.aabb().midpoint()[axis])
-                .unwrap()
-        });
-        let (mut a, mut b) = surfaces.split_at_mut(surfaces.len() / 2);
-        CanHit::BVH {
-            bounding,
-            children: vec![new(&mut a), new(&mut b)],
-        }
-    } else {
-        CanHit::BVH {
-            bounding,
-            children: surfaces.to_vec(),
-        }
-    }
-}
-/*
-pub enum BVH<'a> {
-    Internal {
-        surfaces: Vec<BVH<'a>>,
-        bounding: AABB,
-    },
-    Leaf {
-        surfaces: &'a mut [Box<dyn CanHit + Sync>],
-        bounding: AABB,
-    }
-}
-impl<'a> BVH<'a> {
-    pub fn new(surfaces: &'a mut [Box<dyn CanHit + Sync>]) -> BVH<'a> {
+    fn new_recur(
+        surfaces: &'a mut [CanHit<'m>],
+        surface_index: usize,
+        internal: &mut Vec<Internal>,
+        leaf: &mut Vec<Leaf>,
+    ) -> ChildPointer {
         let mut bounding = AABB::zero();
         for surface in surfaces.iter() {
             bounding.union_mut(&surface.aabb());
         }
-        if surfaces.len() >= 2 {
+        if surfaces.len() <= 2 {
+            let idx = leaf.len();
+            leaf.push(Leaf {
+                begin: surface_index,
+                length: surfaces.len(),
+                bounding,
+            });
+            ChildPointer::Leaf(idx)
+        } else {
             let axis = bounding.max_axis();
 
-            surfaces.sort_unstable_by(|a,b| a.aabb().midpoint()[axis].partial_cmp(&b.aabb().midpoint()[axis]).unwrap());
-            let (a, b) = surfaces.split_at_mut(surfaces.len() / 2);
-            // compute AABB
-            // find largest axis
-            // sort and split + recurse on this axis
-            BVH::Internal {
-                surfaces: vec![BVH::new(a), BVH::new(b)],
-                bounding: bounding
-            }
-        } else {
-            BVH::Leaf {
-                surfaces: surfaces,
-                bounding: bounding
-            }
+            surfaces.sort_unstable_by(|a, b| {
+                a.aabb().midpoint()[axis]
+                    .partial_cmp(&b.aabb().midpoint()[axis])
+                    .unwrap()
+            });
+            let (mut l, mut r) = surfaces.split_at_mut(surfaces.len() / 2);
+
+            let ll = l.len();
+            let ln = BVH::new_recur(&mut l, surface_index, internal, leaf);
+            let rn = BVH::new_recur(&mut r, surface_index + ll, internal, leaf);
+
+            let idx = internal.len();
+            internal.push(Internal {
+                left: ln,
+                right: rn,
+                bounding,
+            });
+            ChildPointer::Internal(idx)
         }
     }
 
-    fn bounding(&self) -> &AABB {
-        match self {
-            BVH::Internal { bounding, .. } => bounding,
-            BVH::Leaf { bounding, .. } => bounding,
-        }
+    pub fn ray_intersect(&'m self, ray: &Ray) -> Option<(f32, &'a dyn Geometry<'m>)> {
+        self.ray_intersect_walk(ray, &ChildPointer::Internal(self.root))
     }
 
-}
-impl<'a> CanHit for BVH<'a> {
-    fn ray_intersect(&self, ray: &crate::Ray) -> Option<(f32, &dyn Geometry)> {
-        if !self.bounding().ray_hit(ray) {
-            return None
-        }
-        let mut best_hit: Option<(f32, &dyn Geometry)> = None;
-        match self {
-            BVH::Internal { surfaces, .. } => {
-                for surf in surfaces {
+    fn ray_intersect_walk(
+        &'m self,
+        ray: &Ray,
+        p: &ChildPointer,
+    ) -> Option<(f32, &'a dyn Geometry<'m>)> {
+        match p {
+            ChildPointer::Internal(i) => {
+                let node = &self.internal[*i];
+                if !node.bounding.ray_hit(ray) {
+                    return None;
+                }
+                self.ray_intersect_walk(ray, &node.left)
+                    .or_else(|| self.ray_intersect_walk(ray, &node.right))
+            }
+            ChildPointer::Leaf(l) => {
+                let leaf = &self.leaf[*l];
+                if !leaf.bounding.ray_hit(ray) {
+                    return None;
+                }
+                let mut best_hit = None;
+                for surf in self.surfaces[leaf.begin..(leaf.begin + leaf.length)].iter() {
                     if let Some((t, geom)) = surf.ray_intersect(&ray) {
                         if let Some((prior_t, _)) = best_hit {
                             if t < prior_t {
@@ -89,26 +104,54 @@ impl<'a> CanHit for BVH<'a> {
                         }
                     }
                 }
-            }
-            BVH::Leaf { surfaces, .. } => {
-                for surf in surfaces.iter() {
-                    if let Some((t, geom)) = surf.ray_intersect(&ray) {
-                        if let Some((prior_t, _)) = best_hit {
-                            if t < prior_t {
-                                best_hit = Some((t, geom));
-                            }
-                        } else {
-                            best_hit = Some((t, geom));
-                        }
-                    }
-                }
+                best_hit
             }
         }
-        best_hit
     }
 
-    fn aabb(&self) -> AABB {
-        self.bounding().clone()
+    pub fn hits_any(&'m self, ray: &Ray) -> bool {
+        self.hits_any_walk(ray, &ChildPointer::Internal(self.root))
+    }
+
+    fn hits_any_walk(&'m self, ray: &Ray, p: &ChildPointer) -> bool {
+        match p {
+            ChildPointer::Internal(i) => {
+                let node = &self.internal[*i];
+                if !node.bounding.ray_hit(ray) {
+                    return false;
+                }
+                self.hits_any_walk(ray, &node.left) || self.hits_any_walk(ray, &node.right)
+            }
+            ChildPointer::Leaf(l) => {
+                let leaf = &self.leaf[*l];
+                if !leaf.bounding.ray_hit(ray) {
+                    return false;
+                }
+                for surf in self.surfaces[leaf.begin..(leaf.begin + leaf.length)].iter() {
+                    if surf.hits_any(ray) {
+                        return true;
+                    }
+                }
+                false
+            }
+        }
     }
 }
-*/
+#[derive(Debug, Clone)]
+pub struct Internal {
+    left: ChildPointer,
+    right: ChildPointer,
+    bounding: AABB,
+}
+#[derive(Debug, Clone)]
+pub struct Leaf {
+    begin: usize,
+    length: usize,
+    bounding: AABB,
+}
+
+#[derive(Debug, Clone)]
+enum ChildPointer {
+    Internal(usize),
+    Leaf(usize),
+}
