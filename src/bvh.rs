@@ -46,12 +46,12 @@ impl<'a> BVH<'a> {
 }
 impl<'a> CanHit for BVH<'a> {
     fn ray_intersect(&self, ray: &crate::Ray) -> Option<(f32, &dyn Geometry)> {
+        if !self.bounding().ray_hit(ray) {
+            return None
+        }
+        let mut best_hit: Option<(f32, &dyn Geometry)> = None;
         match self {
-            BVH::Internal { surfaces, bounding } => {
-                if !bounding.ray_hit(&ray) {
-                    return None;
-                }
-                let mut best_hit: Option<(f32, &dyn Geometry)> = None;
+            BVH::Internal { surfaces, .. } => {
                 for surf in surfaces {
                     if let Some((t, geom)) = surf.ray_intersect(&ray) {
                         if let Some((prior_t, _)) = best_hit {
@@ -63,14 +63,8 @@ impl<'a> CanHit for BVH<'a> {
                         }
                     }
                 }
-                best_hit
             }
-            BVH::Leaf { surfaces, bounding } => {
-                if !bounding.ray_hit(&ray) {
-                    return None;
-                }
-
-                let mut best_hit: Option<(f32, &dyn Geometry)> = None;
+            BVH::Leaf { surfaces, .. } => {
                 for surf in surfaces.iter() {
                     if let Some((t, geom)) = surf.ray_intersect(&ray) {
                         if let Some((prior_t, _)) = best_hit {
@@ -82,10 +76,9 @@ impl<'a> CanHit for BVH<'a> {
                         }
                     }
                 }
-                best_hit
-
             }
         }
+        best_hit
     }
 
     fn aabb(&self) -> AABB {
