@@ -1,21 +1,78 @@
+use std::f32::NEG_INFINITY;
+
 use glam::Vec3A;
 
 use crate::Ray;
 
-pub trait Surface {
+pub trait CanHit {
+    fn ray_intersect(&self, ray: &Ray) -> Option<(f32, &dyn Geometry)>;
+    fn hits_any(&self, ray: &Ray) -> bool {
+        self.ray_intersect(ray).is_some()
+    }
+    fn aabb(&self) -> AABB;
+}
+pub trait Geometry {
     fn material(&self) -> &Material;
-
-    fn ray_intersect(&self, ray: &Ray) -> Option<f32>;
     fn hit(&self, ray: &Ray, t: f32) -> Hit;
 }
+#[derive(Debug, Clone)]
+pub struct AABB {
+    min: Vec3A,
+    max: Vec3A,
+}
+impl AABB {
+    pub fn ray_hit(&self, ray: &Ray) -> bool {
+        let mut min_t = Vec3A::splat(0.0);
+        let mut max_t = Vec3A::splat(0.0);
+
+        for i in 0..=2 {
+            let ta = (self.min[i] - ray.origin[i]) / ray.direction[i];
+            let tb = (self.max[i] - ray.origin[i]) / ray.direction[i];
+            min_t[i] = ta.min(tb);
+            max_t[i] = ta.max(tb);
+        }
+
+        min_t.max_element() < max_t.min_element()
+    }
+
+    pub fn midpoint(&self) -> Vec3A {
+        (self.min + self.max) / 2.0
+    }
+
+    pub fn zero() -> AABB {
+        AABB {
+            min: Vec3A::ZERO,
+            max: Vec3A::ZERO,
+        }
+    }
+
+    pub fn union_mut(&mut self, aabb: &AABB) {
+        self.min = self.min.min(aabb.min);
+        self.max = self.max.max(aabb.max);
+    }
+
+    pub fn max_axis(&self) -> usize {
+        let diff = self.max - self.min;
+        let mut max = -NEG_INFINITY;
+        let mut max_i = 0;
+        for i in 0..=2 {
+            if diff[i] > max {
+                max = diff[i];
+                max_i = i;
+            }
+        }
+        return max_i;
+    }
+}
+
 pub struct Sphere {
     pub origin: Vec3A,
     pub radius: f32,
 
     pub material: Material,
 }
-impl Surface for Sphere {
-    fn ray_intersect(&self, ray: &Ray) -> Option<f32> {
+impl CanHit for Sphere {
+    fn ray_intersect(&self, ray: &Ray) -> Option<(f32, &dyn Geometry)> {
         let a = ray.direction.length_squared();
         let oc = ray.origin - self.origin;
         let half_b = oc.dot(ray.direction);
@@ -28,25 +85,34 @@ impl Surface for Sphere {
             let root_one = (-half_b - discriminant.sqrt()) / a;
             let root_two = (-half_b + discriminant.sqrt()) / a;
             if root_one > 1.0 {
-                Some(root_one)
+                Some((root_one, self))
             } else if root_two > 1.0 {
-                Some(root_two)
+                Some((root_two, self))
             } else {
                 None
             }
         }
     }
+
+    fn aabb(&self) -> AABB {
+        AABB {
+            min: self.origin - Vec3A::splat(self.radius),
+            max: self.origin + Vec3A::splat(self.radius),
+        }
+    }
+}
+impl Geometry for Sphere {
     fn hit(&self, ray: &Ray, t: f32) -> Hit {
-        let p = ray.origin + t*ray.direction;
-        Hit { 
+        let p = ray.origin + t * ray.direction;
+        Hit {
             at: p,
-            surface_normal: (p - self.origin).normalize()
+            surface_normal: (p - self.origin).normalize(),
         }
     }
 
     fn material(&self) -> &Material {
         &self.material
-    } 
+    }
 }
 
 pub struct Triangle {
@@ -56,12 +122,12 @@ pub struct Triangle {
 
     normal: Vec3A,
 
-    pub material: Material
+    pub material: Material,
 }
 impl Triangle {
     pub fn new(v0: Vec3A, v1: Vec3A, v2: Vec3A, material: Material) -> Triangle {
-        let a = v1-v0;
-        let b = v2-v0;
+        let a = v1 - v0;
+        let b = v2 - v0;
         let normal = a.cross(b).normalize();
 
         Triangle {
@@ -69,14 +135,14 @@ impl Triangle {
             v1,
             v2,
             normal,
-            material
+            material,
         }
     }
 }
 
 pub const EPSILON: f32 = 1e-6;
-impl Surface for Triangle {
-    fn ray_intersect(&self, ray: &Ray) -> Option<f32> {
+impl CanHit for Triangle {
+    fn ray_intersect(&self, ray: &Ray) -> Option<(f32, &dyn Geometry)> {
         // if ray and plane of triangle are parallel, no intersection
         // Moller-Trumbore
         let v0v1 = self.v1 - self.v0;
@@ -84,7 +150,7 @@ impl Surface for Triangle {
         let det = -ray.direction.dot(v0v1.cross(v0v2));
 
         if det < EPSILON {
-            return None
+            return None;
         }
 
         let inv_det = 1.0 / det;
@@ -93,13 +159,13 @@ impl Surface for Triangle {
         let det_u = -ray.direction.dot(b.cross(v0v2));
         let u = inv_det * det_u;
         if u < 0.0 || u > 1.0 {
-            return None
+            return None;
         }
 
         let det_v = -ray.direction.dot(v0v1.cross(b));
         let v = inv_det * det_v;
         if v < 0.0 || u + v > 1.0 {
-            return None
+            return None;
         }
 
         let det_t = b.dot(v0v1.cross(v0v2));
@@ -107,13 +173,21 @@ impl Surface for Triangle {
         if t < EPSILON {
             None
         } else {
-            Some(t)
+            Some((t, self))
         }
     }
 
+    fn aabb(&self) -> AABB {
+        AABB {
+            min: self.v0.min(self.v1.min(self.v2)),
+            max: self.v0.max(self.v1.max(self.v2)),
+        }
+    }
+}
+impl Geometry for Triangle {
     fn hit(&self, ray: &Ray, t: f32) -> Hit {
         Hit {
-            at: ray.origin + t*ray.direction,
+            at: ray.origin + t * ray.direction,
             surface_normal: self.normal,
         }
     }
@@ -126,10 +200,10 @@ impl Surface for Triangle {
 
 pub struct Hit {
     pub at: Vec3A,
-    pub surface_normal: Vec3A
+    pub surface_normal: Vec3A,
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct Material {
     pub k_ambient: Vec3A,
     pub k_diffuse: Vec3A,
@@ -153,12 +227,12 @@ impl Material {
 mod tests {
     use glam::Vec3A;
 
-    use crate::Ray;
+    use crate::{surface::AABB, Ray};
 
-    use super::{Triangle, Material, Surface};
+    use super::{CanHit, Material, Triangle};
 
     fn assert_approx_ex(a: f32, b: f32, msg: &'static str) {
-        println!("{} ~= {}? a - b: {}", a, b, (a-b).abs());
+        println!("{} ~= {}? a - b: {}", a, b, (a - b).abs());
         assert!((a - b).abs() < 1e-8, "{}: {} !~= {}", msg, a, b);
     }
 
@@ -168,12 +242,42 @@ mod tests {
             Vec3A::new(6.0, -2.0, 16.0),
             Vec3A::new(-6.0, -2.0, 16.0),
             Vec3A::new(0.0, 5.0, 16.0),
-            Material::default()
+            Material::default(),
         );
 
-        let ray = Ray { origin: Vec3A::ZERO, direction: Vec3A::new(-1.0, 5.0, 16.0).normalize() };
+        let ray = Ray {
+            origin: Vec3A::ZERO,
+            direction: Vec3A::new(-1.0, 5.0, 16.0).normalize(),
+        };
 
-        assert!(triangle.ray_intersect(&Ray { origin: Vec3A::ZERO, direction: Vec3A::new(-1.0, 5.0, 16.0).normalize() }).is_none());
-        assert!(triangle.ray_intersect(&Ray { origin: Vec3A::ZERO, direction: Vec3A::new(0.0, 5.0, 16.0).normalize() }).is_some());
+        assert!(triangle
+            .ray_intersect(&Ray {
+                origin: Vec3A::ZERO,
+                direction: Vec3A::new(-1.0, 5.0, 16.0).normalize()
+            })
+            .is_none());
+        assert!(triangle
+            .ray_intersect(&Ray {
+                origin: Vec3A::ZERO,
+                direction: Vec3A::new(0.0, 5.0, 16.0).normalize()
+            })
+            .is_some());
+    }
+
+    #[test]
+    fn test_aabb_intersection() {
+        let aabb = AABB {
+            min: Vec3A::splat(-1.0),
+            max: Vec3A::splat(1.0),
+        };
+
+        assert!(aabb.ray_hit(&Ray {
+            origin: Vec3A::new(0.0, 0.0, -2.0),
+            direction: Vec3A::Z
+        }));
+        assert!(!aabb.ray_hit(&Ray {
+            origin: Vec3A::new(2.0, 0.0, -2.0),
+            direction: Vec3A::Z
+        }));
     }
 }

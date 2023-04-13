@@ -1,18 +1,20 @@
+mod bvh;
 mod surface;
 
 use std::fs::File;
 use std::sync::{atomic::AtomicUsize, Arc};
-use std::thread;
 use std::time::{Duration, Instant};
+use std::{io, thread};
 
-use std::io::Write;
+use std::io::{BufRead, Write};
 
+use bvh::BVH;
 use glam::Vec3A;
 use rand::Rng;
 use rayon::prelude::*;
-use surface::Surface;
+use surface::{CanHit, Geometry};
 
-use crate::surface::{Sphere, Material, Triangle};
+use crate::surface::{Material, Sphere, Triangle};
 
 struct Image {
     width: usize,
@@ -45,45 +47,49 @@ pub struct Ray {
     direction: Vec3A,
 }
 
-
 struct Light {
     origin: Vec3A,
     diffuse_color: Vec3A,
     specular_color: Vec3A,
 }
 
-struct Scene {
-    surfaces: Vec<Box<dyn Surface + Sync>>,
+struct SceneBuilder {
+    surfaces: Vec<Box<dyn CanHit + Sync>>,
     lights: Vec<Light>,
     global_light: Vec3A,
     camera: Vec3A,
 }
-impl Scene {
-    pub fn hits_any(&self, ray: &Ray) -> bool {
-        for sphere in &self.surfaces {
-            if let Some(_) = sphere.ray_intersect(&ray) {
-                return true
-            }
+impl SceneBuilder {
+    pub fn build<'a>(&'a mut self) -> Scene<'a> {
+        Scene {
+            bvh: BVH::new(&mut self.surfaces),
+            lights: & self.lights,
+            global_light: self.global_light,
+            camera: self.camera
         }
-        false
+    }
+    pub fn add_quad(&mut self, v0: Vec3A, v1: Vec3A, v2: Vec3A, v3: Vec3A, material: Material) {
+        self.surfaces
+            .push(Box::new(Triangle::new(v0, v1, v2, material.clone())));
+        self.surfaces
+            .push(Box::new(Triangle::new(v0, v2, v3, material)));
+    }
+}
+struct Scene<'a> {
+    bvh: BVH<'a>,
+    lights: &'a [Light],
+    global_light: Vec3A,
+    camera: Vec3A,
+}
+impl<'a> Scene<'a> {
+    pub fn hits_any(&self, ray: &Ray) -> bool {
+        self.bvh.hits_any(ray)
     }
 
-    pub fn best_hit(&self, ray: &Ray) -> Option<(f32, &Box<dyn Surface + Sync>)> {
-        let mut best_hit: Option<(f32, &Box<dyn Surface + Sync>)> = None;
-        for sphere in &self.surfaces {
-            if let Some(t) = sphere.ray_intersect(&ray) {
-                if let Some((prior_t, _)) = best_hit {
-                    if t < prior_t {
-                        best_hit = Some((t, sphere));
-                    }
-                } else {
-                    best_hit = Some((t, sphere));
-                }
-            }
-        }
-        best_hit
+    pub fn best_hit(&self, ray: &Ray) -> Option<(f32, &dyn Geometry)> {
+        self.bvh.ray_intersect(ray)
     }
-    
+
     pub fn ray_color(&self, ray: &Ray, depth: usize) -> Vec3A {
         let mut color = Vec3A::ZERO;
         if depth <= 0 {
@@ -94,33 +100,46 @@ impl Scene {
             let hit = surface.hit(ray, t);
             let p = hit.at;
             let n = hit.surface_normal;
-            for light in &self.lights {
+            for light in self.lights.iter() {
                 let l_v = (light.origin - p).normalize();
                 let v = (self.camera - p).normalize();
-                let view_reflection = (2.0*(n.dot(v)*n)) - v;
+                let view_reflection = (2.0 * (n.dot(v) * n)) - v;
 
-                color += surface.material().k_reflective * self.ray_color(&Ray { origin: p, direction: view_reflection}, depth - 1);
+                color += surface.material().k_reflective
+                    * self.ray_color(
+                        &Ray {
+                            origin: p,
+                            direction: view_reflection,
+                        },
+                        depth - 1,
+                    );
 
                 let d = l_v.dot(n);
 
-                if d > 0.0 && !self.hits_any(&Ray { origin: p, direction: l_v }) {
-                    let lr = (2.0*(n.dot(l_v))*n) - l_v;
+                if d > 0.0
+                    && !self.hits_any(&Ray {
+                        origin: p,
+                        direction: l_v,
+                    })
+                {
+                    let lr = (2.0 * (n.dot(l_v)) * n) - l_v;
                     color += surface.material().k_diffuse * d * light.diffuse_color;
-                    color += surface.material().k_specular * v.dot(lr).powf(surface.material().shininess) * light.specular_color;
+                    color += surface.material().k_specular
+                        * v.dot(lr).powf(surface.material().shininess)
+                        * light.specular_color;
                 }
             }
         }
         color
     }
 
-    pub fn add_quad(&mut self, v0: Vec3A, v1: Vec3A, v2: Vec3A, v3: Vec3A, material: Material) {
-        self.surfaces.push(Box::new(Triangle::new(v0, v1, v2, material.clone())));
-        self.surfaces.push(Box::new(Triangle::new(v0, v2, v3, material)));
-    }
+    
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut image = Image::new(960, 540);
+    let width = 960;
+    let height = width * 9 / 16;
+    let mut image = Image::new(width, height);
 
     let h = image.height;
     let w = image.width;
@@ -135,7 +154,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let camera = Vec3A::new(0.0, 0.0, -1.0);
 
-    let mut scene = Scene {
+    let mut builder = SceneBuilder {
         surfaces: vec![
             Box::new(Sphere {
                 origin: Vec3A::new(-4.0, -0.5, 14.0),
@@ -146,7 +165,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     k_reflective: Vec3A::splat(0.2),
                     k_specular: Vec3A::splat(0.1),
                     shininess: 20.0,
-                }
+                },
             }),
             Box::new(Sphere {
                 origin: Vec3A::new(3.0, 0.0, 10.0),
@@ -157,7 +176,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     k_reflective: Vec3A::splat(0.2),
                     k_specular: Vec3A::splat(0.1),
                     shininess: 20.0,
-                }
+                },
             }),
             Box::new(Sphere {
                 origin: Vec3A::new(3.5, 0.5, 8.0),
@@ -168,26 +187,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     k_reflective: Vec3A::splat(0.2),
                     k_specular: Vec3A::splat(0.1),
                     shininess: 20.0,
-                }
+                },
             }),
         ],
         lights: vec![
             Light {
                 origin: Vec3A::new(-1.0, 8.0, 11.0),
-                diffuse_color: 0.5*Vec3A::new(1.0, 0.2, 1.0),
+                diffuse_color: 0.5 * Vec3A::new(1.0, 0.2, 1.0),
                 specular_color: Vec3A::splat(0.8),
             },
             Light {
                 origin: Vec3A::new(9.0, 8.0, 5.0),
-                diffuse_color: 0.5*Vec3A::new(0.0, 1.0, 0.0),
+                diffuse_color: 0.5 * Vec3A::new(0.0, 1.0, 0.0),
                 specular_color: Vec3A::splat(0.8),
-            }
+            },
         ],
         global_light: Vec3A::new(0.5, 0.5, 0.5),
-        camera
+        camera,
     };
 
-    scene.add_quad(
+    builder.add_quad(
         Vec3A::new(10.0, -1.5, 3.0),
         Vec3A::new(-10.0, -1.5, 3.0),
         Vec3A::new(-10.0, -1.5, 20.0),
@@ -198,15 +217,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             k_reflective: Vec3A::splat(0.1),
             k_specular: Vec3A::splat(0.1),
             shininess: 20.0,
-        }
+        },
     );
 
+    let load = Instant::now();
+    let teapot = File::open("teapot.obj")?;
+    let mut vertices: Vec<Vec3A> = vec![];
+    let material = Material {
+        k_ambient: Vec3A::new(0.7, 0.3, 0.7),
+        k_diffuse: Vec3A::new(0.5, 0.5, 0.7),
+        k_reflective: Vec3A::splat(0.1),
+        k_specular: Vec3A::splat(0.1),
+        shininess: 20.0,
+    };
+    let offset = Vec3A::new(0.0, 0.0, 10.0);
+    for line in io::BufReader::new(teapot).lines() {
+        let line = line?;
+        match line.chars().next() {
+            Some('v') => {
+                let nums = line.split(' ').skip(1).map(|s| s.parse::<f32>()).flatten().collect::<Vec<f32>>();
+                vertices.push(Vec3A::from_slice(&nums) + offset);
+            }
+            Some('f') => {
+                let nums = line.split(' ').skip(1).map(|s| s.parse::<usize>()).flatten().collect::<Vec<usize>>();
+                builder.surfaces.push(Box::new(Triangle::new(
+                    vertices[nums[0]-1],
+                    vertices[nums[1]-1],
+                    vertices[nums[2]-1],
+                    material.clone()
+                )));
+            }
+            _ => ()
+        }
+    }
+    println!("Finished load in: {} ms", load.elapsed().as_millis());
+
+    let scene = builder.build();
     let pixels_rendered = Arc::new(AtomicUsize::new(0));
     let rayon_counter = Arc::clone(&pixels_rendered);
     let reporter_counter = Arc::clone(&pixels_rendered);
 
     let render = Instant::now();
-    let samples = 100;
+    let samples = 1;
     let _handle = thread::spawn(move || loop {
         let rendered = reporter_counter.load(std::sync::atomic::Ordering::SeqCst);
         let percent = rendered as f32 * 100.0 / (fh * fw);
@@ -228,8 +280,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let mut rng = rand::thread_rng();
             for _ in 0..samples {
-                let xt = (x as f32 + rng.gen::<f32>()) / (fw - 1.0);
-                let yt = (y as f32 + rng.gen::<f32>()) / (fh - 1.0);
+                let xt = (x as f32 /*+ rng.gen::<f32>()*/) / (fw - 1.0);
+                let yt = (y as f32 /*+ rng.gen::<f32>()*/) / (fh - 1.0);
 
                 let t = top_left.lerp(top_right, xt);
                 let b = bottom_left.lerp(bottom_right, xt);
@@ -241,8 +293,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
 
                 *pixel += scene.ray_color(&ray, ray_depth);
-
-                
             }
             *pixel /= samples as f32;
             rayon_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
