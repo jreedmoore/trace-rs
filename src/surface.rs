@@ -22,21 +22,16 @@ pub struct AABB {
 }
 impl AABB {
     pub fn ray_hit(&self, ray: &Ray) -> bool {
-        let mut min_t = Vec3A::splat(0.0);
-        let mut max_t = Vec3A::splat(0.0);
-
-        for i in 0..=2 {
-            let ta = (self.min[i] - ray.origin[i]) / ray.direction[i];
-            let tb = (self.max[i] - ray.origin[i]) / ray.direction[i];
-            min_t[i] = ta.min(tb);
-            max_t[i] = ta.max(tb);
-        }
+        let ta = (self.min - ray.origin) / ray.direction;
+        let tb = (self.max - ray.origin) / ray.direction;
+        let min_t = ta.min(tb);
+        let max_t = ta.max(tb);
 
         min_t.max_element() < max_t.min_element()
     }
 
     pub fn midpoint(&self) -> Vec3A {
-        (self.min + self.max) / 2.0
+        (self.min + self.max) * 0.5
     }
 
     pub fn zero() -> AABB {
@@ -245,22 +240,11 @@ mod tests {
             Material::default(),
         );
 
-        let ray = Ray {
-            origin: Vec3A::ZERO,
-            direction: Vec3A::new(-1.0, 5.0, 16.0).normalize(),
-        };
-
         assert!(triangle
-            .ray_intersect(&Ray {
-                origin: Vec3A::ZERO,
-                direction: Vec3A::new(-1.0, 5.0, 16.0).normalize()
-            })
+            .ray_intersect(&Ray::new( Vec3A::ZERO, Vec3A::new(-1.0, 5.0, 16.0).normalize()))
             .is_none());
         assert!(triangle
-            .ray_intersect(&Ray {
-                origin: Vec3A::ZERO,
-                direction: Vec3A::new(0.0, 5.0, 16.0).normalize()
-            })
+            .ray_intersect(&Ray::new(Vec3A::ZERO, Vec3A::new(0.0, 5.0, 16.0).normalize()))
             .is_some());
     }
 
@@ -271,13 +255,7 @@ mod tests {
             max: Vec3A::splat(1.0),
         };
 
-        assert!(aabb.ray_hit(&Ray {
-            origin: Vec3A::new(0.0, 0.0, -2.0),
-            direction: Vec3A::Z
-        }));
-        assert!(!aabb.ray_hit(&Ray {
-            origin: Vec3A::new(2.0, 0.0, -2.0),
-            direction: Vec3A::Z
-        }));
+        assert!(aabb.ray_hit(&Ray::new(Vec3A::new(0.0, 0.0, -2.0),Vec3A::Z)));
+        assert!(!aabb.ray_hit(&Ray::new(Vec3A::new(2.0, 0.0, -2.0),Vec3A::Z)));
     }
 }

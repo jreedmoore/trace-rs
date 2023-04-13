@@ -46,6 +46,14 @@ pub struct Ray {
     origin: Vec3A,
     direction: Vec3A,
 }
+impl Ray {
+    fn new(origin: Vec3A, direction: Vec3A) -> Ray {
+        Ray {
+            origin,
+            direction,
+        }
+    }
+}
 
 struct Light {
     origin: Vec3A,
@@ -107,20 +115,13 @@ impl<'a> Scene<'a> {
 
                 color += surface.material().k_reflective
                     * self.ray_color(
-                        &Ray {
-                            origin: p,
-                            direction: view_reflection,
-                        },
+                        &Ray::new(p, view_reflection),
                         depth - 1,
                     );
 
                 let d = l_v.dot(n);
 
-                if d > 0.0
-                    && !self.hits_any(&Ray {
-                        origin: p,
-                        direction: l_v,
-                    })
+                if d > 0.0 && !self.hits_any(&Ray::new(p, l_v))
                 {
                     let lr = (2.0 * (n.dot(l_v)) * n) - l_v;
                     color += surface.material().k_diffuse * d * light.diffuse_color;
@@ -287,10 +288,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let b = bottom_left.lerp(bottom_right, xt);
                 let p = t.lerp(b, yt);
 
-                let ray = Ray {
-                    origin: p,
-                    direction: p - camera,
-                };
+                let ray = Ray::new(p, p - camera);
 
                 *pixel += scene.ray_color(&ray, ray_depth);
             }
